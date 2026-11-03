@@ -1,0 +1,66 @@
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>html,body{margin:0;padding:0;background:#fff;}#viewer{width:{{W}}px;height:{{H}}px;}</style>
+<script src="3Dmol-min.js"></script></head><body><div id="viewer"></div>
+<script id="pdbdata" type="text/plain">
+{{PDB}}
+</script>
+<script>
+var AA3MAP={{AA3}}, CFG={{CFG}};
+window.addEventListener('load',function(){
+ var v=$3Dmol.createViewer(document.getElementById('viewer'),{backgroundColor:'white'});
+ v.addModel(document.getElementById('pdbdata').textContent,'pdb');
+ v.setStyle({},{});
+ var nearRes=CFG.near, model=v.getModel();
+ var map={C:'#9A9A9A',N:'#1F77B4',O:'#D62728',S:'#DDDD00'}, gmap={C:'#E3E3E3',N:'#E3E3E3',O:'#E3E3E3',S:'#E3E3E3'};
+ /* 突变后丢失的残基集合：它们的卡通骨架也画成浅灰，表示"这段没了" */
+ var delSet={}; (CFG.deleted||[]).forEach(function(r){delSet[r]=1;});
+ /* 1) 卡通飘带底衬：中心残基周围 13 Å 的骨架。按二级结构上色——
+    螺旋红、折叠黄、卷曲浅蓝，模仿文献 Figure 2 的样式 */
+ if(CFG.cartoon){
+   var csel={or:CFG.cartoon.map(function(r){return {chain:r[0],resi:r[1]};})};
+   v.setStyle(csel,{cartoon:{opacity:0.95,colorfunc:function(a){
+     if(delSet[a.resi]) return '#DCDCDC';
+     if(a.ss==='h') return '#DE3B33';
+     if(a.ss==='s'||a.ss==='e') return '#F2C14E';
+     return '#BCD2E8';}}});
+ }
+ /* 2) 球棍模型：细棍 + 每个原子一个小球（文献里那种 ball-and-stick） */
+ nearRes.forEach(function(r){
+   v.setStyle({chain:r[0],resi:r[1]},{stick:{colorscheme:{prop:'elem',map:map},radius:0.13},
+                                      sphere:{colorscheme:{prop:'elem',map:map},radius:0.30}});
+ });
+ v.setStyle({chain:'A',resi:CFG.center},{stick:{colorscheme:{prop:'elem',map:{C:'#2CA02C',N:'#1F77B4',O:'#D62728',S:'#DDDD00'}},radius:0.16},
+                                         sphere:{colorscheme:{prop:'elem',map:{C:'#2CA02C',N:'#1F77B4',O:'#D62728',S:'#DDDD00'}},radius:0.34}});
+ /* 幽灵残基最后上色，才能盖住上面两遍样式（只留细棍，不画球，视觉上"淡出去"） */
+ (CFG.ghost||[]).forEach(function(r){
+   v.setStyle({chain:r[0],resi:r[1]},{stick:{colorscheme:{prop:'elem',map:gmap},radius:0.09}});
+ });
+ CFG.hb.forEach(function(h){
+   /* 氢键用"细圆柱"画成虚线，而不是 addLine：addLine 受深度影响会变淡、还会在画面上拖出杂线 */
+   v.addCylinder({start:{x:h.x1,y:h.y1,z:h.z1},end:{x:h.x2,y:h.y2,z:h.z2},radius:0.05,color:'#333333',dashed:true,dashLength:0.16,fromCap:1,toCap:1});
+   v.addLabel(String(h.d.toFixed(2)),{position:{x:(h.x1+h.x2)/2,y:(h.y1+h.y2)/2-1.2+(h.dy||0),z:(h.z1+h.z2)/2},fontSize:34,fontColor:'black',inFront:true,showBackground:true,backgroundColor:'rgba(255,255,255,0.9)'});
+ });
+ if(CFG.junction){var j=CFG.junction;
+   v.addCylinder({start:{x:j.x1,y:j.y1,z:j.z1},end:{x:j.x2,y:j.y2,z:j.z2},radius:0.1,color:'#8E24AA',dashed:true,dashLength:0.5,fromCap:1,toCap:1});}
+ /* 邻居残基的名字：放在残基外侧（在中心残基左边的就往左放，右边的往右放），
+    避免标签压住原子 */
+ var ca0=model.selectedAtoms({chain:'A',resi:CFG.center,atom:'CA'})[0];
+ (CFG.labels||[]).forEach(function(r){
+   var a=model.selectedAtoms({chain:r[0],resi:r[1],atom:'CA'})[0]; if(!a)return;
+   /* 沿"从中心残基指向该残基"的方向把标签往外推一点，标签就不会压在原子上 */
+   var vx=a.x-ca0.x, vy=a.y-ca0.y, L=Math.sqrt(vx*vx+vy*vy)||1;
+   var ox=vx/L*2.0, oy=vy/L*2.0;
+   v.addLabel(AA3MAP[(model.selectedAtoms({chain:r[0],resi:r[1]})[0]||{}).resn]+(r[1]+(r[0]==='A'?31:26)),
+     {position:{x:a.x+ox,y:a.y+oy,z:a.z},fontSize:32,fontColor:'#333333',inFront:true,showBackground:true,backgroundColor:'rgba(255,255,255,0.85)'});
+ });
+ var ca=model.selectedAtoms({chain:'A',resi:CFG.center,atom:'CA'})[0];
+ if(ca){v.addLabel(CFG.mainlabel,{position:{x:ca.x+(CFG.dx||3),y:ca.y+(CFG.dy_label||2.2),z:ca.z},fontSize:44,fontColor:'#1B5E20',inFront:true,showBackground:true,backgroundColor:'rgba(255,255,255,0.95)',borderColor:'#2CA02C',borderThickness:1.5});}
+ /* 取景范围：a、b 两图必须用同一组原子来 fit，相机才会完全一致
+    所以优先用 CFG.fit（由 R 端显式给出），没有才用中心残基 + 近邻 */
+ var sel=[{chain:'A',resi:CFG.center}];
+ nearRes.forEach(function(r){ sel.push({chain:r[0],resi:r[1]}); });
+ (CFG.ghost||[]).forEach(function(r){ sel.push({chain:r[0],resi:r[1]}); });
+ if(CFG.fit){ sel=CFG.fit.map(function(r){ return {chain:r[0],resi:r[1]}; }); }
+ v.zoomTo({or:sel}); v.zoom(1.05); v.render();
+});
+</script></body></html>
